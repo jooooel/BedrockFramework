@@ -5,7 +5,9 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Connections;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Bedrock.Framework
 {
@@ -42,12 +44,7 @@ namespace Bedrock.Framework
             {
                 foreach (var binding in _builder.Bindings)
                 {
-                    await foreach (var listener in binding.BindAsync(cancellationToken).ConfigureAwait(false))
-                    {
-                        var runningListener = new RunningListener(this, binding, listener);
-                        _listeners.Add(runningListener);
-                        runningListener.Start();
-                    }
+                    await StartRunningListenersAsync(binding, cancellationToken);
                 }
             }
             catch
@@ -111,6 +108,50 @@ namespace Bedrock.Framework
                 _timerAwaitable.Stop();
 
                 await _timerTask.ConfigureAwait(false);
+            }
+        }
+        
+        
+        /// <summary>
+        /// TODO:
+        /// - Kunna stoppa en socket också
+        /// - Tester
+        /// - Exempel-applikation som lägger till socket i efterhand
+        /// </summary>
+        /// <param name="port"></param>
+        /// <param name="configure"></param>
+        /// <param name="cancellationToken"></param>
+        public async Task AddLocalhostSocketListenerAsync(int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
+        {
+            var socketTransportFactory = new SocketTransportFactory(Options.Create(new SocketTransportOptions()), _builder.ApplicationServices.GetLoggerFactory());
+            var connectionBuilder = new ConnectionBuilder(_builder.ApplicationServices);
+
+            configure(connectionBuilder);
+
+            var binding = new LocalHostBinding(port, connectionBuilder.Build(), socketTransportFactory);
+            await StartRunningListenersAsync(binding, cancellationToken);
+        }
+
+        public async Task AddSocketListenerAsync(IPAddress address, int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
+        {
+            var endpoint = new IPEndPoint(address, port);
+
+            var socketTransportFactory = new SocketTransportFactory(Options.Create(new SocketTransportOptions()), _builder.ApplicationServices.GetLoggerFactory());
+            var connectionBuilder = new ConnectionBuilder(_builder.ApplicationServices);
+
+            configure(connectionBuilder);
+
+            var binding = new EndPointBinding(endpoint, connectionBuilder.Build(), socketTransportFactory);
+            await StartRunningListenersAsync(binding, cancellationToken);
+        }
+
+        private async Task StartRunningListenersAsync(ServerBinding binding, CancellationToken cancellationToken = default)
+        {
+            await foreach (var listener in binding.BindAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var runningListener = new RunningListener(this, binding, listener);
+                _listeners.Add(runningListener);
+                runningListener.Start();
             }
         }
 

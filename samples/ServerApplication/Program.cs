@@ -30,12 +30,12 @@ namespace ServerApplication
                         .UseSockets(sockets =>
                         {
                             // Echo server
-                            sockets.ListenLocalhost(5000,
-                                builder => builder.UseConnectionLogging().UseConnectionHandler<EchoServerApplication>());
+                            // sockets.ListenLocalhost(5000,
+                            // builder => builder.UseConnectionLogging().UseConnectionHandler<EchoServerApplication>());
 
                             // HTTP/1.1 server
-                            sockets.Listen(IPAddress.Loopback, 5001,
-                                builder => builder.UseConnectionLogging().UseConnectionHandler<HttpApplication>());
+                            // sockets.Listen(IPAddress.Loopback, 5001,
+                            //     builder => builder.UseConnectionLogging().UseConnectionHandler<HttpApplication>());
 
                             // SignalR Hub
                             sockets.Listen(IPAddress.Loopback, 5002,
@@ -62,8 +62,14 @@ namespace ServerApplication
                         .Build();
 
             var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<Program>();
-
+            
             await server.StartAsync();
+
+            await server.AddLocalhostSocketListenerAsync(5000,
+                 builder => builder.UseConnectionLogging().UseConnectionHandler<EchoServerApplication>());
+            
+            await server.AddSocketListenerAsync(IPAddress.Loopback, 5001,
+                builder => builder.UseConnectionLogging().UseConnectionHandler<HttpApplication>());
 
             foreach (var ep in server.EndPoints)
             {
