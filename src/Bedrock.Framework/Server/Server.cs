@@ -112,14 +112,6 @@ namespace Bedrock.Framework
             }
         }
 
-        /// <summary>
-        /// TODO:
-        /// - Server.cs behöver kanske inte ha olika typer av metoder, den som anropar borde veta hur det ska vara. Hjälpmetoder kan vara extensions?
-        /// - Exempel-applikation som lägger till socket i efterhand
-        /// </summary>
-        /// <param name="port"></param>
-        /// <param name="configure"></param>
-        /// <param name="cancellationToken"></param>
         public Task AddLocalhostSocketListenerAsync(int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
         {
             var socketTransportFactory = new SocketTransportFactory(Options.Create(new SocketTransportOptions()), _builder.ApplicationServices.GetLoggerFactory());
