@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,7 +45,7 @@ namespace Bedrock.Framework
             {
                 foreach (var binding in _builder.Bindings)
                 {
-                    await StartRunningListenersAsync(binding, cancellationToken);
+                    await StartRunningListenersAsync(binding, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch
@@ -110,18 +111,16 @@ namespace Bedrock.Framework
                 await _timerTask.ConfigureAwait(false);
             }
         }
-        
-        
+
         /// <summary>
         /// TODO:
-        /// - Kunna stoppa en socket också
-        /// - Tester
+        /// - Server.cs behöver kanske inte ha olika typer av metoder, den som anropar borde veta hur det ska vara. Hjälpmetoder kan vara extensions?
         /// - Exempel-applikation som lägger till socket i efterhand
         /// </summary>
         /// <param name="port"></param>
         /// <param name="configure"></param>
         /// <param name="cancellationToken"></param>
-        public async Task AddLocalhostSocketListenerAsync(int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
+        public Task AddLocalhostSocketListenerAsync(int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
         {
             var socketTransportFactory = new SocketTransportFactory(Options.Create(new SocketTransportOptions()), _builder.ApplicationServices.GetLoggerFactory());
             var connectionBuilder = new ConnectionBuilder(_builder.ApplicationServices);
@@ -129,10 +128,10 @@ namespace Bedrock.Framework
             configure(connectionBuilder);
 
             var binding = new LocalHostBinding(port, connectionBuilder.Build(), socketTransportFactory);
-            await StartRunningListenersAsync(binding, cancellationToken);
+            return StartRunningListenersAsync(binding, cancellationToken);
         }
 
-        public async Task AddSocketListenerAsync(IPAddress address, int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
+        public Task AddSocketListenerAsync(IPAddress address, int port, Action<IConnectionBuilder> configure, CancellationToken cancellationToken = default)
         {
             var endpoint = new IPEndPoint(address, port);
 
@@ -142,7 +141,43 @@ namespace Bedrock.Framework
             configure(connectionBuilder);
 
             var binding = new EndPointBinding(endpoint, connectionBuilder.Build(), socketTransportFactory);
-            await StartRunningListenersAsync(binding, cancellationToken);
+            return StartRunningListenersAsync(binding, cancellationToken);
+        }
+
+        public Task RemoveLocalhostSocketListener(int port, CancellationToken cancellationToken = default)
+        {
+            return RemoveSocketListener(IPAddress.Loopback, port, cancellationToken);
+        }
+
+        public async Task RemoveSocketListener(IPAddress address, int port, CancellationToken cancellationToken = default)
+        {
+            var listener = _listeners.SingleOrDefault(x =>
+                x.Listener.EndPoint is IPEndPoint endpoint &&
+                endpoint.Address.Equals(address)
+                && endpoint.Port == port
+            );
+
+            if (listener is null)
+            {
+                return;
+            }
+
+            await listener.Listener.UnbindAsync(cancellationToken).ConfigureAwait(false);
+
+            // Signal to the listener that it's time to start the shutdown process
+            // We call this after unbind so that we're not touching the listener anymore
+            _shutdownTcs.TrySetResult(null);
+
+            if (cancellationToken.CanBeCanceled)
+            {
+                await listener.ExecutionTask.WithCancellation(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await listener.ExecutionTask.ConfigureAwait(false);
+            }
+
+            _listeners.Remove(listener);
         }
 
         private async Task StartRunningListenersAsync(ServerBinding binding, CancellationToken cancellationToken = default)
@@ -160,6 +195,7 @@ namespace Bedrock.Framework
             private readonly Server _server;
             private readonly ServerBinding _binding;
             private readonly ConcurrentDictionary<long, (ServerConnection Connection, Task ExecutionTask)> _connections = new ConcurrentDictionary<long, (ServerConnection, Task)>();
+            private readonly TaskCompletionSource<object> _shutdownTcs = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public RunningListener(Server server, ServerBinding binding, IConnectionListener listener)
             {
@@ -256,8 +292,11 @@ namespace Bedrock.Framework
                     id++;
                 }
 
-                // Don't shut down connections until entire server is shutting down
-                await _server._shutdownTcs.Task.ConfigureAwait(false);
+                // Don't shut down connections until this listener or the entire server is shutting down
+                await Task.WhenAny(
+                        _shutdownTcs.Task,
+                        _server._shutdownTcs.Task)
+                    .ConfigureAwait(false);
 
                 // Give connections a chance to close gracefully
                 var tasks = new List<Task>(_connections.Count);
@@ -281,7 +320,6 @@ namespace Bedrock.Framework
 
                 await listener.DisposeAsync().ConfigureAwait(false);
             }
-
 
             private IDisposable BeginConnectionScope(ServerConnection connection)
             {

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Pipelines;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
@@ -49,6 +50,18 @@ namespace Bedrock.Framework.Tests
 
             Assert.True(testResult.Completion.Task.IsCompleted);
             Assert.Equal(expected, testResult.Completion.Task.Result);
+
+            await server.StopAsync();
+        }
+
+        [Fact]
+        public async Task StopSocketBeforeServer()
+        {
+            var (server, _) = await StartServer();
+
+            Assert.NotNull(server.EndPoints.SingleOrDefault(x => x is IPEndPoint endpoint && endpoint.Address.Equals(IPAddress.Loopback) && endpoint.Port == 5000));
+            await server.RemoveLocalhostSocketListener(5000);
+            Assert.Null(server.EndPoints.SingleOrDefault(x => x is IPEndPoint endpoint && endpoint.Address.Equals(IPAddress.Loopback) && endpoint.Port == 5000));
 
             await server.StopAsync();
         }
